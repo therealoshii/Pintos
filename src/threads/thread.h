@@ -5,6 +5,13 @@
 #include <list.h>
 #include <stdint.h>
 
+//for mlfqs
+#include "threads/fixed_point.h"
+
+#define NICE_DEFAULT 0
+#define NICE_MAX 20
+#define NICE_MIN -20
+
 /* States in a thread's life cycle. */
 enum thread_status
   {
@@ -93,6 +100,19 @@ struct thread
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
+    //for the alarm clock
+    int64_t wakeup_tick; //tick for the thread should wake up
+
+    //priority donation elements
+    int init_priority; //base priority (no donations)
+    struct lock *wait_on_lock; //lock thread is currently waiting for
+    struct list donations; //list of threads donating priority to this thread
+    struct list_elem donation_elem; //elememts for donation list
+
+    //for mlfqs
+    int nice;                          /* Niceness, -20..20. */
+    fixed_t recent_cpu;                 /* Recent CPU usage, fixed-point. */
+
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
@@ -137,5 +157,15 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+
+//prototype for thread priority comparison
+bool thread_compare_priority (const struct list_elem *a, const struct list_elem *b, void *aux);
+
+//prototypes for priority scheduling
+void donate_priority (void);
+void remove_lock_donations (struct lock *lock);
+void refresh_priority (void);
+bool thread_compare_donation_priority (const struct list_elem *a,  const struct list_elem *b, void *aux);
+void thread_yield_to_higher_priority (void);
 
 #endif /* threads/thread.h */
