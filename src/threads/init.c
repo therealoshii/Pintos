@@ -72,6 +72,8 @@ static void locate_block_device (enum block_type, const char *name);
 
 int pintos_init (void) NO_RETURN;
 
+static void kernel_monitor (void);
+
 /* Pintos main entry point. */
 int
 pintos_init (void)
@@ -133,13 +135,94 @@ pintos_init (void)
     /* Run actions specified on kernel command line. */
     run_actions (argv);
   } else {
-    // TODO: no command line passed to kernel. Run interactively 
+    kernel_monitor(); 
   }
 
   /* Finish up. */
   shutdown ();
   thread_exit ();
 }
+
+static void kernel_monitor (void) {
+  char input[128];
+  int i = 0;
+
+  printf ("Oshuwu> ");
+
+  while (true) {
+    char c = input_getc ();
+
+    if (c == '\n' || c == '\r') {
+        input[i] = '\0';
+        printf ("\n");
+
+      if (!strcmp (input, "whoami")) {
+          printf ("Vithanage K. O. - 240688E\n");
+      }
+
+      else if (!strcmp (input, "hello")) {
+          printf ("Yo waddup!\n");
+      }
+
+      else if (!strcmp (input, "help")) {
+          printf ("Available commands:\n");
+          printf ("  help    - Show available commands\n");
+          printf ("  whoami  - Show user information\n");
+          printf ("  hello   - Say hello\n");
+          printf ("  uptime  - Show Pintos uptime\n");
+          printf ("  time    - Show RTC time\n");
+          printf ("  exit    - Exit the monitor\n");
+      }
+
+      else if (!strcmp (input, "uptime")) {
+          int64_t ticks = timer_ticks ();
+
+          printf ("Uptime: %"PRId64" seconds "
+                  "(%"PRId64" ticks)\n",
+                  ticks / TIMER_FREQ, ticks);
+      }
+
+      else if (!strcmp (input, "time")) {
+          printf ("RTC value: %"PRId64"\n",
+                  (int64_t) rtc_get_time ());
+      }
+
+      else if (!strcmp (input, "reboot")) {
+          shutdown_reboot ();
+      }
+
+      else if (!strcmp (input, "shutdown")) {
+          shutdown_power_off ();
+      }
+
+      else if (!strcmp (input, "exit")) {
+          return;
+      }
+
+      else {
+          printf ("invalid command\n");
+      }
+
+        i = 0;
+        printf ("Oshuwu> ");
+      }
+
+    else if (c == '\b' || c == 127) {
+        if (i > 0)  {
+            i--;
+            printf ("\b \b");
+          }
+      }
+
+    else if (c >= 32 && c <= 126) {
+        if (i < (int) sizeof input - 1) {
+            input[i++] = c;
+            printf ("%c", c);
+          }
+      }
+  }
+}
+
 
 /* Clear the "BSS", a segment that should be initialized to
    zeros.  It isn't actually stored on disk or zeroed by the
@@ -148,7 +231,7 @@ pintos_init (void)
    The start and end of the BSS segment is recorded by the
    linker as _start_bss and _end_bss.  See kernel.lds. */
 static void
-bss_init (void) 
+bss_init (void)
 {
   extern char _start_bss, _end_bss;
   memset (&_start_bss, 0, &_end_bss - &_start_bss);
