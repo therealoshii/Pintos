@@ -3,9 +3,13 @@
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
 
 static void syscall_handler (struct intr_frame *);
 
+static int get_user (const uint8_t *uaddr);
+static uint8_t read_user_byte (const uint8_t *uaddr);
+static void check_user_buffer (const void *buffer, unsigned size);
 static uint32_t get_arg (struct intr_frame *, int n);
 
 static void sys_exit (int status) NO_RETURN;
@@ -29,9 +33,15 @@ syscall_handler (struct intr_frame *f)
       sys_exit (get_arg (f, 1));
 
     case SYS_WRITE:
-      f->eax = sys_write (get_arg (f, 1), (const void *) get_arg (f, 2),
-                          get_arg (f, 3));
-      break;
+      {
+        int fd = get_arg (f, 1);
+        const void *buffer = (const void *) get_arg (f, 2);
+        unsigned size = get_arg (f, 3);
+
+        check_user_buffer (buffer, size);
+        f->eax = sys_write (fd, buffer, size);
+        break;
+      }
 
     default:
       /* Unknown or not yet implemented: terminate the process. */
@@ -39,16 +49,73 @@ syscall_handler (struct intr_frame *f)
     }
 }
 
+/* Reads a byte at user virtual address UADDR.
+   UADDR must be below PHYS_BASE.
+   Returns the byte value if successful, -1 if a segfault
+   occurred. */
+static int
+get_user (const uint8_t *uaddr)
+{
+  int result;
+  asm ("movl $1f, %0; movzbl %1, %0; 1:"
+       : "=&a" (result) : "m" (*uaddr));
+  return result;
+}
+
+/* Returns the byte at user virtual address UADDR.  Terminates the
+   process if UADDR is a kernel address or is not mapped. */
+static uint8_t
+read_user_byte (const uint8_t *uaddr)
+{
+  int byte;
+
+  if (!is_user_vaddr (uaddr))
+    sys_exit (-1);
+  byte = get_user (uaddr);
+  if (byte == -1)
+    sys_exit (-1);
+  return byte;
+}
+
+/* Terminates the process unless all SIZE bytes of the user buffer
+   at BUFFER can be read.  Mappings are per page, so it is enough
+   to probe one byte in every page that the buffer touches. */
+static void
+check_user_buffer (const void *buffer, unsigned size)
+{
+  const uint8_t *start = buffer;
+  const uint8_t *end = start + size - 1;
+  const uint8_t *p;
+
+  if (size == 0)
+    return;
+
+  /* Reject a buffer that wraps around the top of the address
+     space or reaches into kernel memory. */
+  if (end < start || !is_user_vaddr (end))
+    sys_exit (-1);
+
+  read_user_byte (start);
+  for (p = pg_round_down (start) + PGSIZE; p <= end; p += PGSIZE)
+    read_user_byte (p);
+}
+
 /* Returns the Nth 32-bit word above the user stack pointer saved
    in F.  The caller pushed its arguments and then the system call
    number, so word 0 is the number and words 1, 2, ... are the
    arguments, each taking 4 bytes whatever its type.
-   Temporary: the user address is not validated yet. */
+   The word is read one checked byte at a time, because the stack
+   pointer itself may be bad and a word can straddle two pages. */
 static uint32_t
 get_arg (struct intr_frame *f, int n)
 {
-  uint32_t *sp = f->esp;
-  return sp[n];
+  const uint8_t *p = (const uint8_t *) f->esp + n * sizeof (uint32_t);
+  uint32_t word = 0;
+  size_t i;
+
+  for (i = 0; i < sizeof word; i++)
+    word |= (uint32_t) read_user_byte (p + i) << (i * 8);
+  return word;
 }
 
 /* Terminates the current process with exit code STATUS. */

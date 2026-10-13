@@ -4,6 +4,7 @@
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -147,6 +148,18 @@ page_fault (struct intr_frame *f)
   not_present = (f->error_code & PF_P) == 0;
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
+
+  /* The kernel faulted while touching a user address, which only
+     happens in get_user() and put_user() in syscall.c.  Both load
+     the address of their recovery point into EAX before the
+     access, so resume there and set EAX to -1 to report the
+     failure. */
+  if (!user && is_user_vaddr (fault_addr))
+    {
+      f->eip = (void (*) (void)) f->eax;
+      f->eax = 0xffffffff;
+      return;
+    }
 
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to

@@ -89,13 +89,13 @@ Files: `syscall.c`, and `exception.c` if you choose method B.
 
 Every pointer from a user program may be null, unmapped, or at/above `PHYS_BASE`. Each of those must terminate the process with exit status -1 and leak nothing (no held locks, no unfreed pages).
 
-- [ ] Choose one method:
+- [x] Choose one method (method B chosen):
   - **A (simpler):** validate before dereferencing, using `is_user_vaddr()` (`threads/vaddr.h`) and `pagedir_get_page()` (`userprog/pagedir.c`).
   - **B (faster):** check only that the address is below `PHYS_BASE`, then use the handout's `get_user()` / `put_user()`, and change `page_fault()` so a fault in kernel mode sets `eax` to `0xffffffff` and copies its old value into `eip`.
-- [ ] Validate the stack pointer itself before reading the syscall number.
-- [ ] Validate every byte of every argument, not just the first: a 4-byte argument or a buffer can straddle a page boundary.
+- [x] Validate the stack pointer itself before reading the syscall number.
+- [x] Validate every byte of every argument, not just the first: a 4-byte argument or a buffer can straddle a page boundary.
 - [ ] Validate strings up to and including their terminating `\0`.
-- [ ] Validate the whole `[buffer, buffer + size)` range for `read` and `write`.
+- [ ] Validate the whole `[buffer, buffer + size)` range for `read` and `write`. (Done for `write`; `read` needs a writable check, added with Task 5.)
 
 Tests: `sc-bad-sp`, `sc-bad-arg`, `sc-boundary`, `sc-boundary-2`, `*-bad-ptr`, `*-null`, `*-boundary`, `create-bound`, `bad-read`, `bad-write`, `bad-jump`, `bad-read2`, `bad-write2`, `bad-jump2`.
 
