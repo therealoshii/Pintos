@@ -19,7 +19,9 @@
 #include "threads/vaddr.h"
 
 static thread_func start_process NO_RETURN;
-static bool load (const char *cmdline, void (**eip) (void), void **esp);
+static bool load (char *cmdline, void (**eip) (void), void **esp);
+
+#define MAX_ARGS (PGSIZE / sizeof (char *)) // most arguments one page of pointers can hold
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -29,6 +31,9 @@ tid_t
 process_execute (const char *file_name) 
 {
   char *fn_copy;
+  char prog_name[16];
+  const char *start;
+  size_t len;
   tid_t tid;
 
   /* Make a copy of FILE_NAME.
@@ -38,8 +43,15 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
+  // The thread is named after the program only, so copy out the first word of the command line
+  start = file_name + strspn (file_name, " ");
+  len = strcspn (start, " ");
+  if (len > sizeof prog_name - 1)
+    len = sizeof prog_name - 1;
+  strlcpy (prog_name, start, len + 1);
+
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (prog_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
@@ -197,20 +209,26 @@ struct Elf32_Phdr
 #define PF_W 2          /* Writable. */
 #define PF_R 4          /* Readable. */
 
-static bool setup_stack (void **esp);
+static bool setup_stack (void **esp, int argc, char **argv);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
                           bool writable);
 
-/* Loads an ELF executable from FILE_NAME into the current thread.
+/* Loads an ELF executable into the current thread.  CMDLINE is
+   the program name followed by its arguments, separated by
+   spaces; it is split into words in place.
    Stores the executable's entry point into *EIP
    and its initial stack pointer into *ESP.
    Returns true if successful, false otherwise. */
 bool
-load (const char *file_name, void (**eip) (void), void **esp) 
+load (char *cmdline, void (**eip) (void), void **esp) 
 {
   struct thread *t = thread_current ();
+  const char *file_name;
+  char **argv = NULL;
+  int argc = 0;
+  char *token, *save_ptr;
   struct Elf32_Ehdr ehdr;
   struct file *file = NULL;
   off_t file_ofs;
@@ -222,6 +240,21 @@ load (const char *file_name, void (**eip) (void), void **esp)
   if (t->pagedir == NULL) 
     goto done;
   process_activate ();
+
+  // Split the command line into words; argv[] points into CMDLINE itself
+  argv = palloc_get_page (0);
+  if (argv == NULL)
+    goto done;
+  for (token = strtok_r (cmdline, " ", &save_ptr); token != NULL;
+       token = strtok_r (NULL, " ", &save_ptr))
+    {
+      if ((size_t) argc >= MAX_ARGS)
+        goto done;
+      argv[argc++] = token;
+    }
+  if (argc == 0)
+    goto done;
+  file_name = argv[0]; // the first word is the program to run
 
   /* Open executable file. */
   file = filesys_open (file_name);
@@ -304,7 +337,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
     }
 
   /* Set up stack. */
-  if (!setup_stack (esp))
+  if (!setup_stack (esp, argc, argv))
     goto done;
 
   /* Start address. */
@@ -315,6 +348,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
  done:
   /* We arrive here whether the load is successful or not. */
   file_close (file);
+  palloc_free_page (argv);
   return success;
 }
 
@@ -426,24 +460,64 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   return true;
 }
 
-/* Create a minimal stack by mapping a zeroed page at the top of
-   user virtual memory. */
+/* Create a stack by mapping a zeroed page at the top of user
+   virtual memory, then push the ARGC arguments in ARGV onto it in
+   the layout that _start() expects.  The entries of ARGV are
+   overwritten with the user addresses of the copied strings. */
 static bool
-setup_stack (void **esp) 
+setup_stack (void **esp, int argc, char **argv) 
 {
   uint8_t *kpage;
   bool success = false;
+  size_t str_bytes = 0;
+  char *sp;
+  uint32_t *wp;
+  uint32_t argv_addr;
+  int i;
+
+  // Everything must fit in the single stack page: the strings (padded to a word),
+  // argv[0..argc] and the three words for argv, argc and the return address
+  for (i = 0; i < argc; i++)
+    str_bytes += strlen (argv[i]) + 1;
+  if (ROUND_UP (str_bytes, 4) + (argc + 1) * sizeof (char *) + 12 > PGSIZE)
+    return false;
 
   kpage = palloc_get_page (PAL_USER | PAL_ZERO);
   if (kpage != NULL) 
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
-      if (success)
-        *esp = PHYS_BASE - 12; // Leave room for a fake return address, argc and argv, all zero
-      else
+      if (!success)
         palloc_free_page (kpage);
     }
-  return success;
+  if (!success)
+    return false;
+
+  // 1. Copy the argument strings to the top of the stack, remembering where each one landed
+  sp = PHYS_BASE;
+  for (i = argc - 1; i >= 0; i--)
+    {
+      size_t len = strlen (argv[i]) + 1;
+      sp -= len;
+      memcpy (sp, argv[i], len);
+      argv[i] = sp;
+    }
+
+  // 2. Round down to a multiple of 4 so the words below are aligned
+  wp = (uint32_t *) ((uintptr_t) sp & ~3);
+
+  // 3. argv[argc] is a null pointer, then argv[argc-1] down to argv[0]
+  *--wp = 0;
+  for (i = argc - 1; i >= 0; i--)
+    *--wp = (uint32_t) argv[i];
+
+  // 4. argv (the address of argv[0]), argc, and a fake return address
+  argv_addr = (uint32_t) wp;
+  *--wp = argv_addr;
+  *--wp = argc;
+  *--wp = 0;
+
+  *esp = wp;
+  return true;
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel

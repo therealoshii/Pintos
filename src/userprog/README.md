@@ -55,9 +55,9 @@ If the kernel boot-loops with "triple fault" right after `Pintos booting with`, 
 
 Files: `process.c` (`process_execute`, `start_process`, `load`, `setup_stack`).
 
-- [ ] Split the command line at spaces; runs of spaces count as one. `strtok_r()` from `lib/string.h` is the suggested tool (not `strtok`).
-- [ ] Use only the first word as the program name: pass it to `thread_create()` (thread names hold 15 characters) and to `filesys_open()` in `load()`.
-- [ ] Build the initial stack in the page just below `PHYS_BASE`, top down:
+- [x] Split the command line at spaces; runs of spaces count as one. `strtok_r()` from `lib/string.h` is the suggested tool (not `strtok`).
+- [x] Use only the first word as the program name: pass it to `thread_create()` (thread names hold 15 characters) and to `filesys_open()` in `load()`.
+- [x] Build the initial stack in the page just below `PHYS_BASE`, top down:
   1. the argument strings themselves (any order);
   2. padding so the stack pointer is a multiple of 4;
   3. a null pointer (`argv[argc]`);
@@ -65,8 +65,8 @@ Files: `process.c` (`process_execute`, `start_process`, `load`, `setup_stack`).
   5. `argv` (address of `argv[0]`);
   6. `argc`;
   7. a fake return address (0).
-- [ ] Set `*esp` to the address of the fake return address, and remove the `PHYS_BASE - 12` hack.
-- [ ] Decide a limit on argument size (one 4 kB page is acceptable) and fail the load cleanly if it is exceeded.
+- [x] Set `*esp` to the address of the fake return address, and remove the `PHYS_BASE - 12` hack.
+- [x] Decide a limit on argument size (one 4 kB page is acceptable) and fail the load cleanly if it is exceeded.
 
 `hex_dump()` (in `<stdio.h>`) is useful for checking the stack layout.
 
