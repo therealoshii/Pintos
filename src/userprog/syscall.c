@@ -24,6 +24,8 @@ syscall_handler (struct intr_frame *f)
   switch (args[0])
     {
     case SYS_EXIT:
+      /* Record the status so process_exit() can report it. */
+      thread_current ()->exit_status = args[1];
       thread_exit ();
 
     case SYS_WRITE:
