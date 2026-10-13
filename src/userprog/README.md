@@ -103,11 +103,11 @@ Tests: `sc-bad-sp`, `sc-bad-arg`, `sc-boundary`, `sc-boundary-2`, `*-bad-ptr`, `
 
 Files: `syscall.c`.
 
-- [ ] In `syscall_handler()`, read the syscall number at `f->esp`, then the arguments at `esp + 4`, `esp + 8`, `esp + 12` (each argument is 4 bytes).
-- [ ] Dispatch on the number (values in `lib/syscall-nr.h`) to one function per call.
-- [ ] Put return values in `f->eax`.
-- [ ] Write one shared helper for fetching arguments rather than repeating the code 13 times.
-- [ ] Terminate the process on an unknown syscall number.
+- [x] In `syscall_handler()`, read the syscall number at `f->esp`, then the arguments at `esp + 4`, `esp + 8`, `esp + 12` (each argument is 4 bytes).
+- [x] Dispatch on the number (values in `lib/syscall-nr.h`) to one function per call.
+- [x] Put return values in `f->eax`.
+- [x] Write one shared helper for fetching arguments rather than repeating the code 13 times.
+- [x] Terminate the process on an unknown syscall number.
 
 ## Task 5: `halt`, `exit`, and console I/O
 
