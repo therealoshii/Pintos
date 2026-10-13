@@ -13,8 +13,38 @@ syscall_init (void)
 }
 
 static void
-syscall_handler (struct intr_frame *f UNUSED) 
+syscall_handler (struct intr_frame *f)
 {
-  printf ("system call!\n");
-  thread_exit ();
+  /* The caller pushed its arguments and then the system call
+     number, so the number is the 32-bit word at the user stack
+     pointer and each argument is in the next higher word.
+     Temporary: these user addresses are not validated yet. */
+  uint32_t *args = f->esp;
+
+  switch (args[0])
+    {
+    case SYS_EXIT:
+      thread_exit ();
+
+    case SYS_WRITE:
+      {
+        int fd = args[1];
+        const char *buffer = (const char *) args[2];
+        unsigned size = args[3];
+
+        /* Only the console is supported for now. */
+        if (fd == STDOUT_FILENO)
+          {
+            putbuf (buffer, size);
+            f->eax = size;
+          }
+        else
+          f->eax = -1;
+        break;
+      }
+
+    default:
+      printf ("system call!\n");
+      thread_exit ();
+    }
 }
