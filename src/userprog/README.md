@@ -76,10 +76,10 @@ Tests: `args-none`, `args-single`, `args-multiple`, `args-many`, `args-dbl-space
 
 Files: `process.c` (`process_exit`), `threads/thread.h`.
 
-- [ ] Add an exit-status field to `struct thread` (inside `#ifdef USERPROG`).
-- [ ] When a user process ends for any reason, print exactly `printf ("%s: exit(%d)\n", name, status);` where `name` is the program name without arguments.
-- [ ] Do not print it for kernel threads that are not user processes, or when `halt` is called.
-- [ ] A process killed by the kernel (bad pointer, exception) must report status `-1`. `kill()` in `exception.c` currently calls `thread_exit()` directly, so the status has to be -1 on that path.
+- [x] Add an exit-status field to `struct thread` (inside `#ifdef USERPROG`).
+- [x] When a user process ends for any reason, print exactly `printf ("%s: exit(%d)\n", name, status);` where `name` is the program name without arguments.
+- [x] Do not print it for kernel threads that are not user processes, or when `halt` is called.
+- [x] A process killed by the kernel (bad pointer, exception) must report status `-1`. `kill()` in `exception.c` currently calls `thread_exit()` directly, so the status has to be -1 on that path.
 
 Tests: every test checks this line, so it must be right before anything else passes.
 
