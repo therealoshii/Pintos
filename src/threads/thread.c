@@ -670,6 +670,11 @@ init_thread (struct thread *t, const char *name, int priority)
   list_init (&t->donations);
   t->magic = THREAD_MAGIC;
 
+#ifdef USERPROG
+  //a process that dies without calling exit (killed by the kernel) reports -1
+  t->exit_status = -1;
+#endif
+
   //mlfqs
   t->nice = NICE_DEFAULT;
   t->recent_cpu = FP_CONST (0);
