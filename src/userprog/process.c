@@ -115,8 +115,11 @@ process_exit (void)
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
-  if (pd != NULL) 
+  if (pd != NULL)
     {
+      // Only user processes have a page directory, so kernel threads print nothing
+      printf ("%s: exit(%d)\n", cur->name, cur->exit_status);
+
       /* Correct ordering here is crucial.  We must set
          cur->pagedir to NULL before switching page directories,
          so that a timer interrupt can't switch back to the
