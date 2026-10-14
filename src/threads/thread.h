@@ -117,6 +117,8 @@ struct thread
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
     int exit_status;                    /* Status printed when the process exits. */
+    struct list open_files;             /* Files opened by this process. */
+    int next_fd;                        /* Descriptor the next open() returns. */
 #endif
 
     /* Owned by thread.c. */

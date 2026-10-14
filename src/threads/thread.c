@@ -673,6 +673,8 @@ init_thread (struct thread *t, const char *name, int priority)
 #ifdef USERPROG
   //a process that dies without calling exit (killed by the kernel) reports -1
   t->exit_status = -1;
+  list_init (&t->open_files);
+  t->next_fd = 2; //0 and 1 are the console
 #endif
 
   //mlfqs
