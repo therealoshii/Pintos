@@ -7,6 +7,7 @@
 #include <string.h>
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
+#include "userprog/syscall.h"
 #include "userprog/tss.h"
 #include "filesys/directory.h"
 #include "filesys/file.h"
@@ -71,7 +72,9 @@ start_process (void *file_name_)
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
+  lock_acquire (&filesys_lock); // load() reads the executable from the file system
   success = load (file_name, &if_.eip, &if_.esp);
+  lock_release (&filesys_lock);
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
@@ -97,12 +100,29 @@ start_process (void *file_name_)
 
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
-int
-process_wait (tid_t child_tid UNUSED)
+struct wait_probe { tid_t tid; bool found; };
+
+static void
+probe_tid (struct thread *t, void *aux)
 {
-  while (1)
-    thread_yield (); // wait forever so Pintos does not return -1 without running the user program
-  return -1;
+  struct wait_probe *w = aux;
+  if (t->tid == w->tid)
+    w->found = true;
+}
+
+int
+process_wait (tid_t child_tid)
+{
+  for (;;)
+    {
+      struct wait_probe w = { child_tid, false };
+      enum intr_level old = intr_disable ();
+      thread_foreach (probe_tid, &w);
+      intr_set_level (old);
+      if (!w.found)
+        return 0;
+      thread_yield ();
+    }
 }
 
 /* Free the current process's resources. */
@@ -111,6 +131,9 @@ process_exit (void)
 {
   struct thread *cur = thread_current ();
   uint32_t *pd;
+
+  // Exiting closes every file the process still has open
+  syscall_close_files ();
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
