@@ -124,17 +124,17 @@ Tests: `halt`, `exit`.
 
 Files: `syscall.c`, `threads/thread.h` (per-process fd table), `process.c` (cleanup on exit).
 
-- [ ] Create one global file-system lock and hold it around every call into `filesys/` code, including the executable load in `process.c`. Release it on every error path.
-- [ ] Give each process its own fd table. fds start at 2; 0 and 1 are reserved for the console. fds are not inherited by children.
-- [ ] `create(file, initial_size)`: returns true/false. Does not open the file.
-- [ ] `remove(file)`: returns true/false. Removing an open file does not close it.
-- [ ] `open(file)`: returns a new fd, or -1 on failure. Opening the same file twice gives two independent fds with separate positions.
-- [ ] `filesize(fd)`: size in bytes.
-- [ ] `read(fd, buffer, size)`: bytes read (0 at end of file), or -1 on error. Reading from fd 1 is an error.
-- [ ] `write(fd, buffer, size)`: bytes actually written; files cannot grow, so this may be less than `size`. Writing to fd 0 is an error.
-- [ ] `seek(fd, position)` and `tell(fd)`.
-- [ ] `close(fd)`: closing an invalid fd, an already-closed fd, or fd 0/1 must not crash the kernel.
-- [ ] On process exit, close every fd the process still has open.
+- [x] Create one global file-system lock and hold it around every call into `filesys/` code, including the executable load in `process.c`. Release it on every error path.
+- [x] Give each process its own fd table. fds start at 2; 0 and 1 are reserved for the console. fds are not inherited by children.
+- [x] `create(file, initial_size)`: returns true/false. Does not open the file.
+- [x] `remove(file)`: returns true/false. Removing an open file does not close it.
+- [x] `open(file)`: returns a new fd, or -1 on failure. Opening the same file twice gives two independent fds with separate positions.
+- [x] `filesize(fd)`: size in bytes.
+- [x] `read(fd, buffer, size)`: bytes read (0 at end of file), or -1 on error. Reading from fd 1 is an error.
+- [x] `write(fd, buffer, size)`: bytes actually written; files cannot grow, so this may be less than `size`. Writing to fd 0 is an error.
+- [x] `seek(fd, position)` and `tell(fd)`.
+- [x] `close(fd)`: closing an invalid fd, an already-closed fd, or fd 0/1 must not crash the kernel.
+- [x] On process exit, close every fd the process still has open.
 
 Tests: `create-*`, `open-*`, `read-*`, `write-*`, `close-*`, `multi-child-fd`, and all 13 `tests/filesys/base` tests (`sm-*`, `lg-*`, `syn-read`, `syn-write`, `syn-remove`).
 
