@@ -149,11 +149,8 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
-  /* The kernel faulted while touching a user address, which only
-     happens in get_user() and put_user() in syscall.c.  Both load
-     the address of their recovery point into EAX before the
-     access, so resume there and set EAX to -1 to report the
-     failure. */
+  /* Kernel faulted while accessing user memory (get_user/put_user).
+     Jump to recovery address in eax and set eax to -1. */
   if (!user && is_user_vaddr (fault_addr))
     {
       f->eip = (void (*) (void)) f->eax;

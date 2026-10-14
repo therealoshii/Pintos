@@ -95,7 +95,7 @@ Every pointer from a user program may be null, unmapped, or at/above `PHYS_BASE`
 - [x] Validate the stack pointer itself before reading the syscall number.
 - [x] Validate every byte of every argument, not just the first: a 4-byte argument or a buffer can straddle a page boundary.
 - [ ] Validate strings up to and including their terminating `\0`.
-- [ ] Validate the whole `[buffer, buffer + size)` range for `read` and `write`. (Done for `write`; `read` needs a writable check, added with Task 5.)
+- [x] Validate the whole `[buffer, buffer + size)` range for `read` and `write`.
 
 Tests: `sc-bad-sp`, `sc-bad-arg`, `sc-boundary`, `sc-boundary-2`, `*-bad-ptr`, `*-null`, `*-boundary`, `create-bound`, `bad-read`, `bad-write`, `bad-jump`, `bad-read2`, `bad-write2`, `bad-jump2`.
 
@@ -113,10 +113,10 @@ Files: `syscall.c`.
 
 Files: `syscall.c`.
 
-- [ ] `halt`: call `shutdown_power_off()` (`devices/shutdown.h`).
-- [ ] `exit(status)`: record the status, then terminate the process (Task 2 prints the message).
-- [ ] `write` to fd 1: send the buffer in one `putbuf()` call (splitting only very large buffers), and return the number of bytes written.
-- [ ] `read` from fd 0: fill the buffer using `input_getc()`.
+- [x] `halt`: call `shutdown_power_off()` (`devices/shutdown.h`).
+- [x] `exit(status)`: record the status, then terminate the process (Task 2 prints the message).
+- [x] `write` to fd 1: send the buffer in one `putbuf()` call (splitting only very large buffers), and return the number of bytes written.
+- [x] `read` from fd 0: fill the buffer using `input_getc()`.
 
 Tests: `halt`, `exit`.
 
