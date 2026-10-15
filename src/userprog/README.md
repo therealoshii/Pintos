@@ -142,17 +142,17 @@ Tests: `create-*`, `open-*`, `read-*`, `write-*`, `close-*`, `multi-child-fd`, a
 
 Files: `process.c`, `syscall.c`, `threads/thread.h`, `threads/thread.c`.
 
-- [ ] Define a per-child status record, allocated on the heap, holding at least: the child's tid, its exit status, whether it has exited, whether it has been waited on, and the synchronisation needed to wait for it.
-- [ ] Give each process a list of these records for its children.
-- [ ] Create and initialise the record before the child can possibly finish; pass what the child needs through the `aux` argument of `thread_create()`.
-- [ ] `exec(cmd_line)`: the parent must block until the child's `load()` has succeeded or failed. Return the pid on success and -1 if the program cannot load or run.
-- [ ] `process_wait(tid)`: replace the Task 0 infinite loop. Block until that child exits, then return its exit status.
-- [ ] `wait` returns -1 immediately if the pid is not a direct child of the caller, or if the caller already waited on it.
-- [ ] `wait` returns -1 if the child was killed by the kernel rather than calling `exit`.
-- [ ] `wait` must work when the child has already exited before the parent calls it.
-- [ ] Implement the `wait` system call by calling `process_wait()`.
-- [ ] Free everything in both orders: parent exits first, or child exits first. Whoever goes last frees the shared record. A parent may exit without waiting for some or all children.
-- [ ] Pintos must not power off until the initial process exits (`main()` in `threads/init.c` relies on `process_wait()` for this).
+- [x] Define a per-child status record, allocated on the heap, holding at least: the child's tid, its exit status, whether it has exited, whether it has been waited on, and the synchronisation needed to wait for it.
+- [x] Give each process a list of these records for its children.
+- [x] Create and initialise the record before the child can possibly finish; pass what the child needs through the `aux` argument of `thread_create()`.
+- [x] `exec(cmd_line)`: the parent must block until the child's `load()` has succeeded or failed. Return the pid on success and -1 if the program cannot load or run.
+- [x] `process_wait(tid)`: replace the Task 0 infinite loop. Block until that child exits, then return its exit status.
+- [x] `wait` returns -1 immediately if the pid is not a direct child of the caller, or if the caller already waited on it.
+- [x] `wait` returns -1 if the child was killed by the kernel rather than calling `exit`.
+- [x] `wait` must work when the child has already exited before the parent calls it.
+- [x] Implement the `wait` system call by calling `process_wait()`.
+- [x] Free everything in both orders: parent exits first, or child exits first. Whoever goes last frees the shared record. A parent may exit without waiting for some or all children.
+- [x] Pintos must not power off until the initial process exits (`main()` in `threads/init.c` relies on `process_wait()` for this).
 
 Tests: `exec-once`, `exec-multiple`, `exec-arg`, `exec-missing`, `exec-bad-ptr`, `wait-simple`, `wait-twice`, `wait-bad-pid`, `wait-killed`, `multi-recurse` (15 points).
 
