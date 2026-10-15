@@ -1,4 +1,5 @@
 #include "userprog/syscall.h"
+#include "userprog/process.h"
 #include <stdio.h>
 #include <syscall-nr.h>
 #include <list.h>
@@ -34,6 +35,8 @@ static uint32_t get_arg (struct intr_frame *, int n);
 
 static void sys_halt (void) NO_RETURN;
 static void sys_exit (int status) NO_RETURN;
+static int sys_exec (const char *cmd_line);
+static int sys_wait (int pid);
 static bool sys_create (const char *file, unsigned initial_size);
 static bool sys_remove (const char *file);
 static int sys_open (const char *file);
@@ -64,6 +67,19 @@ syscall_handler (struct intr_frame *f)
 
     case SYS_EXIT:
       sys_exit (get_arg (f, 1));
+
+    case SYS_EXEC:
+      {
+        const char *cmd_line = (const char *) get_arg (f, 1);
+
+        check_user_string (cmd_line);
+        f->eax = sys_exec (cmd_line);
+        break;
+      }
+
+    case SYS_WAIT:
+      f->eax = sys_wait (get_arg (f, 1));
+      break;
 
     case SYS_CREATE:
       {
@@ -285,6 +301,19 @@ sys_write (int fd, const void *buffer, unsigned size)
       lock_release (&filesys_lock);
       return bytes;
     }
+}
+
+/* Start a child process; -1 if it could not be loaded */
+static int
+sys_exec (const char *cmd_line)
+{
+  return process_execute (cmd_line);
+}
+
+static int
+sys_wait (int pid)
+{
+  return process_wait (pid);
 }
 
 static bool
