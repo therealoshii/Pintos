@@ -13,13 +13,33 @@ Rules that apply to every task:
 
 ## Build and test
 
-Start the container from the repo root:
+### 1. Start the container (PowerShell)
+
+Go to the repo root first; the command mounts the current folder into the container.
+
+```bash
+cd C:\Users\Oshan\Documents\Pintos
+```
 
 ```bash
 docker run -it --rm --name pintos --mount type=bind,source="${PWD}",target=/home/PKUOS/pintos pkuflyingpig/pintos bash
 ```
 
-Inside the container:
+If Docker says the name `pintos` is already in use, an old container is still running. Remove it and run the command above again:
+
+```bash
+docker rm -f pintos
+```
+
+### 2. Build and test (inside the container)
+
+Quick version:
+
+```bash
+cd /home/PKUOS/pintos/src/userprog && make && cd build && make check
+```
+
+Step by step:
 
 ```bash
 cd /home/PKUOS/pintos/src/userprog && make
@@ -31,6 +51,19 @@ cat tests/userprog/args-none.output     # see what that test printed
 ```
 
 To re-run a single test, delete its `.output` file first. There is no `make report` target.
+
+### Common problems
+
+- **Kernel boot-loops with "triple fault"**: the build folder is stale. Run `make clean && make` in `src/userprog`.
+- **`read-normal` and `read-boundary` fail**: Git on Windows gave `tests/userprog/sample.txt` Windows line endings. Fix it from the repo root in PowerShell:
+
+```bash
+docker run -it --rm --name pintos --mount type=bind,source="${PWD}",target=/home/PKUOS/pintos pkuflyingpig/pintos bash
+
+cd pintos/src/userprog
+make clean
+make
+```
 
 | Test set | Tests | Weight in `make grade` |
 |---|---|---|
@@ -162,22 +195,22 @@ Files: `process.c`, `threads/thread.h`.
 
 The upstream handout calls this extra credit, but the three `rox-*` tests are in this repo's functionality rubric (9 points), so it is needed for full marks.
 
-- [ ] In `load()`, call `file_deny_write()` on the executable and keep the file open instead of closing it at the end of `load()`.
-- [ ] Store the open file in the process, and close it in `process_exit()` (closing re-enables writes).
+- [x] In `load()`, call `file_deny_write()` on the executable and keep the file open instead of closing it at the end of `load()`.
+- [x] Store the open file in the process, and close it in `process_exit()` (closing re-enables writes).
 
 Tests: `rox-simple`, `rox-child`, `rox-multichild`.
 
 ## Task 9: Resource cleanup under memory pressure
 
-- [ ] Check every `malloc()` and `palloc_get_page()` for failure and fail the operation cleanly.
-- [ ] Confirm that a process which dies at any point (failed load, bad pointer, normal exit) frees its pages, its fd table, its child records and its executable file, and releases the file-system lock.
+- [x] Check every `malloc()` and `palloc_get_page()` for failure and fail the operation cleanly.
+- [x] Confirm that a process which dies at any point (failed load, bad pointer, normal exit) frees its pages, its fd table, its child records and its executable file, and releases the file-system lock.
 
 Test: `multi-oom` (worth 10% of the grade on its own). It repeatedly spawns processes until memory runs out and fails if any memory is leaked.
 
 ## Task 10: Design document
 
-- [ ] Get the project 2 template (`userprog.tmpl`); it is not in this repo.
-- [ ] Copy it to `src/userprog/DESIGNDOC` and fill in every section: data structures, algorithms, synchronisation and rationale for argument passing and for system calls.
+- [x] Get the project 2 template (`userprog.tmpl`); it is not in this repo.
+- [x] Copy it to `src/userprog/DESIGNDOC` and fill in every section: data structures, algorithms, synchronisation and rationale for argument passing and for system calls.
 
 ## Task 11: Submission
 
