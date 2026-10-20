@@ -677,6 +677,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->next_fd = 2; //0 and 1 are the console
   list_init (&t->children);
   t->self_info = NULL; //set by start_process() for user processes
+  t->exec_file = NULL; //set by load()
 #endif
 
   //mlfqs

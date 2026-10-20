@@ -123,6 +123,7 @@ struct thread
     int next_fd;                        /* Descriptor the next open() returns. */
     struct list children;               /* child_info of each child we started. */
     struct child_info *self_info;       /* Our record shared with our parent. */
+    struct file *exec_file;             /* Our executable, kept open to deny writes. */
 #endif
 
     /* Owned by thread.c. */
