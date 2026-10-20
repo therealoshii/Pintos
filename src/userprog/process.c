@@ -201,6 +201,15 @@ process_exit (void)
   // Exiting closes every file the process still has open
   syscall_close_files ();
 
+  // Closing our executable lets it be written to again
+  if (cur->exec_file != NULL)
+    {
+      lock_acquire (&filesys_lock);
+      file_close (cur->exec_file);
+      lock_release (&filesys_lock);
+      cur->exec_file = NULL;
+    }
+
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
@@ -387,8 +396,9 @@ load (char *cmdline, void (**eip) (void), void **esp)
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);
-      goto done; 
+      goto done;
     }
+  file_deny_write (file); // nobody may modify the program while it runs
 
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -473,7 +483,12 @@ load (char *cmdline, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
+  // On success keep the executable open until exit, since closing it
+  // would allow writes again
+  if (success)
+    t->exec_file = file;
+  else
+    file_close (file);
   palloc_free_page (argv);
   return success;
 }
