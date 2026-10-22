@@ -1,0 +1,297 @@
+# Project 2: User Programs
+
+## Preliminaries
+
+>Fill in your name and email address.
+
+Vithanage K.O. 240688E \
+<kenneth.24@cse.mrt.ac.lk>
+
+>If you have any preliminary comments on your submission, notes for the TAs, please give them here.
+
+All 80 tests pass with make check and make grade reports 100%.
+Denying writes to running executables is implemented (rox-* tests pass).
+
+>Please cite any offline or online sources you consulted while preparing your submission, other than the Pintos documentation, course text, lecture notes, and course staff.
+
+- https://web.stanford.edu/class/cs140/projects/pintos/pintos_3.html
+- https://pkuflyingpig.gitbook.io/pintos/project-description/lab2-user-programs/faq
+- https://github.com/ranimeshehata/PintOS-Userprog-Phase2
+
+## Argument Passing
+
+#### DATA STRUCTURES
+
+>A1: Copy here the declaration of each new or changed struct or struct member, global or static variable, typedef, or enumeration. Identify the purpose of each in 25 words or less.
+
+In `userprog/process.c`:
+
+```c
+#define MAX_ARGS (PGSIZE / sizeof (char *))
+```
+
+Upper limit on arguments load() can accept, matching one full page of pointers.
+
+I didn't need any new structs for argument passing. I changed `load()`'s first parameter to a writable `char *cmdline` so I could tokenize the command line directly in place.
+
+#### ALGORITHMS
+
+>A2: Briefly describe how you implemented argument parsing. How do you arrange for the elements of argv[] to be in the right order? How do you avoid overflowing the stack page?
+
+In `process_execute()`, I first copy the whole command line into a fresh page. I extract just the first word to name the thread, which ensures the process termination message prints the program name without its arguments.
+
+When the child thread runs `load()`, it splits this command line using `strtok_r()` with `" "` as the delimiter, which automatically handles runs of consecutive spaces. I store each argument's address in a temporary page allocated via `palloc_get_page()` instead of a local array, since kernel stacks in Pintos are only 4 kB and could easily overflow. `argv[0]` is the executable file that `load()` opens.
+
+`setup_stack()` then lays out the user stack directly below `PHYS_BASE`:
+
+1. Copy each argument string (including its null terminator) from right to left, moving downward from `PHYS_BASE`, and save the user address where each string landed in `argv[i]`.
+2. Round the stack pointer down to a 4-byte boundary for word alignment.
+3. Push a null pointer sentinel (`argv[argc] = NULL`).
+4. Push the argument addresses in reverse order, from `argv[argc-1]` down to `argv[0]`. Because the stack grows downward, pushing in reverse order leaves `argv[0]` at the lowest address, which matches the standard C calling convention.
+5. Push the address of `argv[0]` (i.e. `argv` itself), then `argc`, and finally a fake return address of `0`.
+
+`*esp` is left pointing at the fake return address so `_start()` can read `argc` and `argv` as normal function parameters.
+
+To prevent overflowing the single 4 kB stack page, `setup_stack()` calculates the required space beforehand: the string bytes rounded up to a multiple of 4, plus `(argc + 1)` pointer entries, plus 12 bytes for `argv`, `argc`, and the return address. If this total exceeds `PGSIZE`, the function aborts before writing anything. `load()` also caps the argument count at `MAX_ARGS`.
+
+#### RATIONALE
+
+>A3: Why does Pintos implement strtok_r() but not strtok()?
+
+`strtok()` uses a hidden static pointer to track its position between calls. Because that state is shared globally across the whole kernel, `strtok()` is not reentrant. If one thread is parsing a command line, gets preempted, and another thread calls `strtok()`, the second thread will clobber the saved position and corrupt both parses.
+
+`strtok_r()` solves this by making the caller supply a `save_ptr`. Each calling thread keeps its own parsing state on its own stack, allowing multiple threads to tokenize command lines concurrently without race conditions.
+
+>A4: In Pintos, the kernel separates commands into a executable name and arguments. In Unix-like systems, the shell does this separation. Identify at least two advantages of the Unix approach.
+
+1. **Better security and isolation:** Parsing strings is error-prone. By handling parsing in user space, a malformed string or parsing bug only crashes the shell, not the kernel. It keeps the trusted kernel code base smaller.
+2. **Shell flexibility:** Different shells (bash, zsh, fish) can implement their own quoting rules, environment variable expansions, globs, and pipes without requiring any changes to the kernel.
+3. **Simpler kernel API:** The kernel's exec interface receives an already-tokenized `argv` array rather than having to parse and allocate space for raw command strings.
+
+---
+
+## System Calls
+
+#### DATA STRUCTURES
+
+>B1: Copy here the declaration of each new or changed struct or struct member, global or static variable, typedef, or enumeration. Identify the purpose of each in 25 words or less.
+
+New members of `struct thread` (`threads/thread.h`), all under `USERPROG`:
+
+```c
+int exit_status;
+```
+Exit code of the process; defaults to -1 so killed processes report -1, updated when exit() is called.
+
+```c
+struct list open_files;
+```
+List of open file records (struct open_file) owned by this specific thread.
+
+```c
+int next_fd;
+```
+Next integer file descriptor to hand out on open(); starts at 2 (0 and 1 are console).
+
+```c
+struct list children;
+```
+List of child_info records tracking each child spawned by this process that hasn't been waited on.
+
+```c
+struct child_info *self_info;
+```
+Pointer to the shared record this process shares with its parent for exit reporting.
+
+```c
+struct file *exec_file;
+```
+Points to this process's running executable on disk, kept open to deny writes until exit.
+
+In `userprog/process.c`:
+
+```c
+struct child_info
+  {
+    tid_t tid;
+    int exit_status;
+    struct semaphore exited;
+    int ref_cnt;
+    struct list_elem elem;
+  };
+```
+Heap record shared between parent and child. Tracks exit status, exit semaphore, and reference count for safe deallocation.
+
+```c
+struct exec_info
+  {
+    char *cmdline;
+    struct child_info *child;
+    struct semaphore loaded;
+    bool success;
+  };
+```
+Helper passed through thread_create aux to let parent wait on child's load status and receive the result.
+
+In `userprog/syscall.c`:
+
+```c
+struct lock filesys_lock;
+```
+Global lock ensuring only one thread touches the Pintos file system code at a time.
+
+```c
+struct open_file
+  {
+    int fd;
+    struct file *file;
+    struct list_elem elem;
+  };
+```
+Links an integer fd to a Pintos struct file inside the process's open_files list.
+
+>B2: Describe how file descriptors are associated with open files. Are file descriptors unique within the entire OS or just within a single process?
+
+I keep a linked list of `struct open_file` entries inside each thread (`open_files`). When `open()` succeeds, it calls `filesys_open()`, allocates a new `struct open_file`, assigns `fd = cur->next_fd++`, and adds it to the current thread's list. Whenever a file syscall like `read()`, `write()`, or `close()` is called, it searches only the calling thread's `open_files` using `lookup_fd()`. If the fd isn't in that list, or if someone passes 0 or 1, the call treats it as invalid.
+
+Because of this, file descriptors are strictly local to each process, not global across the OS. Process A and Process B can both have an fd 2 that point to completely different files, and Process A can't access or close Process B's files. Also, if a process opens the same file twice, `filesys_open()` returns two distinct `struct file` instances. They get separate fd numbers, track their file positions independently, and closing one doesn't affect the other.
+
+#### ALGORITHMS
+
+>B3: Describe your code for reading and writing user data from the kernel.
+
+I implemented Method 2 from the project specs: instead of manually walking the page directory in software, I make sure the pointer is below `PHYS_BASE` and let the CPU's MMU catch bad accesses via page faults.
+
+Here is how the pieces fit together:
+- `get_user()` and `put_user()`: These use the inline assembly snippets from the Pintos manual. Before attempting the read or write, the code puts the address of an error-recovery label (`1:`) into EAX.
+- `page_fault()` modification: In `exception.c`, I added a check for when the fault happens in kernel mode on a user virtual address (`!user && is_user_vaddr(fault_addr)`). When that occurs, the handler modifies the interrupt frame: it sets `eip` to the recovery address stored in `eax` and sets `eax` to -1. That causes execution to resume right past the faulting assembly instruction with an error code.
+- `read_user_byte()`: The one place the actual check is written. It checks `is_user_vaddr()`, then calls `get_user()`, and kills the process with `sys_exit(-1)` if either fails. All the helpers below read user memory through it.
+- `check_user_byte()`: Reads the byte with `read_user_byte()`, and if we need write permission, writes it back with `put_user()`. If the write faults, it kills the process with `sys_exit(-1)`.
+- `get_arg()`: Reads the syscall arguments off the user stack (`f->esp + n * 4`). Because an argument might sit right across a page boundary, it reads all 4 bytes one at a time with `read_user_byte()` and builds the 32-bit word.
+- `check_user_string()`: Used for filenames and command strings. It walks byte-by-byte with `read_user_byte()` until it hits `\0`, so any bad byte kills the process.
+- `check_user_buffer()`: Used for buffers in `read` and `write`. It verifies that `buffer + size` doesn't wrap around or hit kernel space, checks the start byte, and then checks one byte on each subsequent page boundary the buffer touches. Testing write permission with `put_user()` also catches attempts to write to read-only code pages.
+
+Once a buffer passes these checks, the kernel can safely read or write it directly with functions like `file_read()` and `file_write()`.
+
+>B4: Suppose a system call causes a full page (4,096 bytes) of data to be copied from user space into the kernel. What is the least and the greatest possible number of inspections of the page table (e.g. calls to pagedir_get_page()) that might result? What about for a system call that only copies 2 bytes of data? Is there room for improvement in these numbers, and how much?
+
+My implementation doesn't call `pagedir_get_page()` at all because the hardware MMU handles address translation. But in terms of page-level probes in `check_user_buffer()`:
+
+- **4,096-byte copy:** If the buffer is page-aligned, it sits on exactly one page, so it needs 1 check. If it starts mid-page and spans across two pages, it touches both and needs 2 checks.
+- **2-byte copy:** It needs 1 check if both bytes are on the same page, or 2 checks if the 2 bytes happen to straddle a page boundary.
+
+This is the theoretical minimum. You cannot do fewer than one check per page touched, because you have to verify every distinct physical page the buffer uses. Checking every single byte would be redundant and waste cycles.
+
+>B5: Briefly describe your implementation of the "wait" system call and how it interacts with process termination.
+
+The `wait(pid)` syscall simply forwards to `process_wait(pid)`:
+1. It searches the calling thread's `children` list for a `struct child_info` matching that `pid`.
+2. If it can't find one, it returns -1 immediately. That naturally takes care of invalid PIDs, processes that aren't direct children, and children that have already been waited on.
+3. If it finds the record, it calls `sema_down(&child->exited)`. If the child is still running, the parent goes to sleep. If the child has already exited, `sema_down` returns right away since the semaphore remembers the up.
+4. The parent grabs `child->exit_status`, removes the child from `children` (so a second wait on the same PID will fail with -1), and drops its reference with `release_child_info()`. Then it returns the exit status.
+
+When a child dies, `process_exit()` handles the other side:
+- It prints the required exit message `"name: exit(status)"`.
+- It copies its `exit_status` into `self_info->exit_status`.
+- It calls `sema_up(&self_info->exited)` to wake up the parent if it's waiting.
+- It drops its reference to `self_info`.
+
+Because `exit_status` is initialized to -1 in `init_thread()`, if a process gets killed abruptly by the kernel (like on a page fault), it automatically exits with -1 without any extra special-case code.
+
+>B6: Any access to user program memory at a user-specified address can fail due to a bad pointer value. Such accesses must cause the process to be terminated. System calls are fraught with such accesses, e.g. a "write" system call requires reading the system call number from the user stack, then each of the call's three arguments, then an arbitrary amount of user memory, and any of these can fail at any point. This poses a design and error-handling problem: how do you best avoid obscuring the primary function of code in a morass of error-handling? Furthermore, when an error is detected, how do you ensure that all temporarily allocated resources (locks, buffers, etc.) are freed? In a few paragraphs, describe the strategy or strategies you adopted for managing these issues. Give an example.
+
+I separated validation from the actual system call work to keep the code clean:
+
+1. **Validation at the entry point:** Inside `syscall_handler()`, I validate all arguments before calling the helper that actually performs the syscall. `get_arg()` pulls parameters from the stack, and `check_user_string()` / `check_user_buffer()` inspect pointers. If anything is invalid, they call `sys_exit(-1)` right then and there and never return. This means the actual syscall functions (`sys_write`, `sys_open`, etc.) can assume all incoming pointers and arguments are 100% valid, keeping their implementation simple and readable.
+
+2. **Strict ordering prevents resource leaks:** I make sure that all user pointer validation happens *before* acquiring `filesys_lock` or allocating any memory with `malloc()`. If a user passes a garbage buffer, the process terminates before taking the lock or allocating an entry. This guarantees we never leak a held lock on a bad pointer fault.
+
+3. **Centralized cleanup in `process_exit()`:** Any process termination—whether calling `exit()`, faulting on a bad pointer, or dying to an exception—always runs through `process_exit()`. That single function cleans up all process resources: closes all open files in `open_files`, closes the running executable to re-enable writes, frees the page directory, wakes up any waiting parent, and cleans up child records.
+
+**Example: `write(fd, buffer, size)`**
+In `syscall_handler`:
+1. `get_arg()` reads `fd`, `buffer`, and `size`. If the user's stack pointer is invalid, it dies here.
+2. `check_user_buffer(buffer, size, false)` probes each page of the buffer. If an unmapped address is passed, it dies here.
+3. Only after both checks pass does `sys_write()` run, acquire `filesys_lock`, and call `file_write()`. Because the buffer was already verified, `file_write()` won't page-fault while holding the file system lock.
+
+#### SYNCHRONIZATION
+
+>B7: The "exec" system call returns -1 if loading the new executable fails, so it cannot return before the new executable has completed loading. How does your code ensure this? How is the load success/failure status passed back to the thread that calls "exec"?
+
+In `process_execute()`, I allocate a `struct exec_info` directly on the parent's stack. It contains the command line string, a pointer to the shared `child_info`, a `loaded` semaphore initialized to 0, and a boolean `success` flag. I pass this struct as the `aux` argument to `thread_create()`.
+
+Immediately after calling `thread_create()`, the parent calls `sema_down(&exec.loaded)` and blocks.
+
+The child thread starts up in `start_process()`, unpacks `exec_info`, and calls `load()`. Once `load()` finishes, the child writes the result into `exec->success` and calls `sema_up(&exec->loaded)`. If loading failed, the child calls `thread_exit()`.
+
+The `sema_up` wakes the parent. The parent checks `exec.success`: if true, it returns the child's TID; if false, it cleans up and returns TID_ERROR (-1). 
+
+Stack-allocating `exec_info` on the parent is completely safe here because the parent is blocked on the semaphore the entire time the child is loading. As soon as the child calls `sema_up`, it never touches `exec_info` again.
+
+>B8: Consider parent process P with child process C. How do you ensure proper synchronization and avoid race conditions when P calls wait(C) before C exits? After C exits? How do you ensure that all resources are freed in each case? How about when P terminates without waiting, before C exits? After C exits? Are there any special cases?
+
+To handle synchronization without memory leaks or use-after-free bugs, I use a heap-allocated `struct child_info` with a reference count (`ref_cnt = 2`), shared between parent P and child C. Each side drops its reference with `release_child_info()`, and whichever side drops the count to 0 frees the memory. I disable interrupts during the decrement to ensure reference counting is atomic.
+
+Here is how each scenario behaves:
+
+1. **P waits before C exits:** P calls `sema_down(&child->exited)` and sleeps. When C exits, `process_exit()` stores its exit status, calls `sema_up(&child->exited)` (waking P), and calls `release_child_info()` (`ref_cnt` becomes 1). P wakes up, reads `exit_status`, and calls `release_child_info()` (`ref_cnt` hits 0 and P frees the struct).
+2. **P waits after C exits:** C has already exited, saved its exit code, upped the semaphore, and dropped its reference (`ref_cnt` = 1). When P eventually calls `wait()`, `sema_down` returns immediately because the semaphore remembers the up. P reads the status and calls `release_child_info()` (`ref_cnt` hits 0 and P frees the struct).
+3. **P exits before C exits:** P's `process_exit()` loops through its `children` list and drops its reference on every child record (`ref_cnt` drops to 1). C keeps executing normally as an orphan. When C finally exits, its call to `release_child_info()` drops `ref_cnt` from 1 to 0 and frees the struct.
+4. **P exits after C exits without waiting:** C already exited and dropped its reference (`ref_cnt` = 1). When P exits without calling `wait()`, its `process_exit()` drops the remaining reference on C's record, bringing `ref_cnt` to 0 and freeing it.
+
+**Corner cases:**
+- **Child load fails:** If `load()` fails, C calls `thread_exit()`, dropping its reference. The parent notices `exec.success == false` in `process_execute()`, calls `release_child_info()` to drop the parent's reference, and returns TID_ERROR without adding C to its `children` list.
+- **`thread_create()` fails:** If the thread can't even be created, `process_execute()` immediately frees the command line page and the `child_info` struct directly.
+- **Thread struct cleanup:** The child's `struct thread` is reclaimed by the scheduler as soon as the thread dies; only the lightweight `child_info` struct stays alive until both sides are done with it.
+
+#### RATIONALE
+
+>B9: Why did you choose to implement access to user memory from the kernel in the way that you did?
+
+I chose Method 2 because it's both faster and closer to how real operating systems like Linux work.
+
+1. **Performance:** In the vast majority of cases, user pointers are completely valid. Walking page directories manually in software with `pagedir_get_page()` adds overhead to every single byte or word read. With Method 2, you just verify `is_user_vaddr()` and let the CPU's MMU translate the address in hardware at full speed.
+2. **True permissions checking:** Software lookups often overlook write permissions on read-only pages (like trying to `read()` into a code segment). `put_user()` performs an actual write cycle, so if the page is write-protected, the MMU faults immediately and we catch it cleanly.
+3. **Simplicity:** It required very little code: just the inline assembly wrappers in `syscall.c` and a short check in `page_fault()` to redirect EIP to the recovery label.
+
+>B10: What advantages or disadvantages can you see to your design for file descriptors?
+
+**Advantages:**
+- **Dynamic memory usage:** Using a linked list inside `struct thread` means processes only use memory for the files they actually have open. If I used a fixed array like `struct file *fds[128]`, it would bloat `struct thread`, which is dangerous because in Pintos the thread struct and the kernel stack share a single 4 kB page.
+- **No stale descriptor bugs:** Incrementing `next_fd` monotonically ensures that if a process closes fd 3 and opens another file, the new file gets fd 4. It won't accidentally reuse fd 3 right away, making it easier to catch use-after-close bugs.
+- **Independent file offsets:** Each `open()` call allocates a separate `struct open_file` with its own `struct file *`, so two open instances of the same file maintain their own independent file positions.
+
+**Disadvantages:**
+- **O(n) lookups:** Finding an fd requires traversing the linked list. For Pintos test cases this is plenty fast, but for real-world servers opening thousands of files, an array or hash table with O(1) lookups would be much better.
+- **No fd recycling:** Since `next_fd` only counts upward, an application running for months opening and closing files repeatedly could theoretically wrap around an integer.
+
+>B11: The default tid_t to pid_t mapping is the identity mapping. If you changed it, what advantages are there to your approach?
+
+I kept the default 1:1 identity mapping where `pid == tid`. In Pintos at this stage, each process is strictly single-threaded, so a thread and a process are effectively the same thing. Adding a separate data structure or translation table to map PIDs to TIDs would add unnecessary complexity without any real benefit. A separate mapping table would only be useful if Pintos supported multithreaded user processes where several threads share a single PID.
+
+---
+
+## Survey Questions
+
+Answering these questions is optional, but it will help us improve the course in future quarters. Feel free to tell us anything you want--these questions are just to spur your thoughts. You may also choose to respond anonymously in the course evaluations at the end of the quarter.
+
+>In your opinion, was this assignment, or any one of the three problems in it, too easy or too hard? Did it take too long or too little time?
+
+The assignment was challenging but very satisfying once everything clicked. Getting exec and wait synchronization right with all the different parent-child exit orderings took the most time and thought.
+
+>Did you find that working on a particular part of the assignment gave you greater insight into some aspect of OS design?
+
+Working through the 80x86 stack layout for argument passing and seeing how trap frames pass data between user mode and kernel mode gave me a much clearer understanding of how the user-kernel boundary works in a real system.
+
+>Is there some particular fact or hint we should give students in future quarters to help them solve the problems? Conversely, did you find any of our guidance to be misleading?
+
+Make sure to remind students working on Windows to watch out for CRLF line endings in test files like `sample.txt`, or recommend using Docker / WSL directly, because a carriage return mismatch can make tests fail even when the C code is correct.
+
+>Do you have any suggestions for the TAs to more effectively assist students, either for future quarters or the remaining projects?
+
+A visual diagram of the expected user stack layout before `_start()` runs is super helpful for getting argument passing right on the first try.
+
+>Any other comments?
+
+None.
+

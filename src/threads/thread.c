@@ -670,6 +670,15 @@ init_thread (struct thread *t, const char *name, int priority)
   list_init (&t->donations);
   t->magic = THREAD_MAGIC;
 
+#ifdef USERPROG
+  t->exit_status = -1; // default exit code for killed processes
+  list_init (&t->open_files); // list of open files
+  t->next_fd = 2; // fd 0 and 1 are stdin/stdout
+  list_init (&t->children); // list of child processes
+  t->self_info = NULL;
+  t->exec_file = NULL;
+#endif
+
   //mlfqs
   t->nice = NICE_DEFAULT;
   t->recent_cpu = FP_CONST (0);

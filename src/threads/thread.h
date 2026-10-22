@@ -8,6 +8,8 @@
 //for mlfqs
 #include "threads/fixed_point.h"
 
+struct child_info;                      /* Defined in userprog/process.c. */
+
 #define NICE_DEFAULT 0
 #define NICE_MAX 20
 #define NICE_MIN -20
@@ -116,6 +118,12 @@ struct thread
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
+    int exit_status;                    // exit status code
+    struct list open_files;             // list of open files
+    int next_fd;                        // next file descriptor
+    struct list children;               // list of child processes
+    struct child_info *self_info;       // shared child info with parent
+    struct file *exec_file;             // running executable file
 #endif
 
     /* Owned by thread.c. */
