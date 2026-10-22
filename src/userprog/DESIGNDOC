@@ -165,9 +165,10 @@ I implemented Method 2 from the project specs: instead of manually walking the p
 Here is how the pieces fit together:
 - `get_user()` and `put_user()`: These use the inline assembly snippets from the Pintos manual. Before attempting the read or write, the code puts the address of an error-recovery label (`1:`) into EAX.
 - `page_fault()` modification: In `exception.c`, I added a check for when the fault happens in kernel mode on a user virtual address (`!user && is_user_vaddr(fault_addr)`). When that occurs, the handler modifies the interrupt frame: it sets `eip` to the recovery address stored in `eax` and sets `eax` to -1. That causes execution to resume right past the faulting assembly instruction with an error code.
-- `check_user_byte()`: A small helper that checks `is_user_vaddr()`, calls `get_user()`, and if we need write permission, writes the byte back with `put_user()`. If any step fails, it kills the process with `sys_exit(-1)`.
-- `get_arg()`: Reads the syscall arguments off the user stack (`f->esp + n * 4`). Because an argument might sit right across a page boundary, it reads all 4 bytes safely and builds the 32-bit word.
-- `check_user_string()`: Used for filenames and command strings. It walks byte-by-byte with `get_user()` until it hits `\0`, aborting if any byte faults.
+- `read_user_byte()`: The one place the actual check is written. It checks `is_user_vaddr()`, then calls `get_user()`, and kills the process with `sys_exit(-1)` if either fails. All the helpers below read user memory through it.
+- `check_user_byte()`: Reads the byte with `read_user_byte()`, and if we need write permission, writes it back with `put_user()`. If the write faults, it kills the process with `sys_exit(-1)`.
+- `get_arg()`: Reads the syscall arguments off the user stack (`f->esp + n * 4`). Because an argument might sit right across a page boundary, it reads all 4 bytes one at a time with `read_user_byte()` and builds the 32-bit word.
+- `check_user_string()`: Used for filenames and command strings. It walks byte-by-byte with `read_user_byte()` until it hits `\0`, so any bad byte kills the process.
 - `check_user_buffer()`: Used for buffers in `read` and `write`. It verifies that `buffer + size` doesn't wrap around or hit kernel space, checks the start byte, and then checks one byte on each subsequent page boundary the buffer touches. Testing write permission with `put_user()` also catches attempts to write to read-only code pages.
 
 Once a buffer passes these checks, the kernel can safely read or write it directly with functions like `file_read()` and `file_write()`.
