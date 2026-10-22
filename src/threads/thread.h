@@ -118,12 +118,12 @@ struct thread
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
-    int exit_status;                    /* Status printed when the process exits. */
-    struct list open_files;             /* Files opened by this process. */
-    int next_fd;                        /* Descriptor the next open() returns. */
-    struct list children;               /* child_info of each child we started. */
-    struct child_info *self_info;       /* Our record shared with our parent. */
-    struct file *exec_file;             /* Our executable, kept open to deny writes. */
+    int exit_status;                    // exit status code
+    struct list open_files;             // list of open files
+    int next_fd;                        // next file descriptor
+    struct list children;               // list of child processes
+    struct child_info *self_info;       // shared child info with parent
+    struct file *exec_file;             // running executable file
 #endif
 
     /* Owned by thread.c. */

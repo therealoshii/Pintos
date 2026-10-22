@@ -149,8 +149,7 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
-  /* Kernel faulted while accessing user memory (get_user/put_user).
-     Jump to recovery address in eax and set eax to -1. */
+  // if kernel faulted accessing user memory, jump to recovery address
   if (!user && is_user_vaddr (fault_addr))
     {
       f->eip = (void (*) (void)) f->eax;

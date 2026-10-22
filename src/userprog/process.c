@@ -24,7 +24,7 @@
 static thread_func start_process NO_RETURN;
 static bool load (char *cmdline, void (**eip) (void), void **esp);
 
-#define MAX_ARGS (PGSIZE / sizeof (char *)) // most arguments one page of pointers can hold
+#define MAX_ARGS (PGSIZE / sizeof (char *))
 
 /* What a parent knows about one child. Lives on the heap because
    either side may die first; whoever lets go last frees it. */
@@ -72,14 +72,14 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
-  // The thread is named after the program only, so copy out the first word of the command line
+  // copy program name for the thread
   start = file_name + strspn (file_name, " ");
   len = strcspn (start, " ");
   if (len > sizeof prog_name - 1)
     len = sizeof prog_name - 1;
   strlcpy (prog_name, start, len + 1);
 
-  // Shared record for parent and child, made before the child can run
+  // create child info record
   child = malloc (sizeof *child);
   if (child == NULL)
     {
@@ -90,6 +90,7 @@ process_execute (const char *file_name)
   sema_init (&child->exited, 0);
   child->ref_cnt = 2;
 
+  // pass info to start_process
   exec.cmdline = fn_copy;
   exec.child = child;
   sema_init (&exec.loaded, 0);
@@ -104,16 +105,16 @@ process_execute (const char *file_name)
       return TID_ERROR;
     }
 
-  // Don't return until the child knows whether its program loaded
+  // wait until child finishes loading
   sema_down (&exec.loaded);
   if (!exec.success)
     {
-      release_child_info (child); // the child releases its half as it exits
+      release_child_info (child);
       return TID_ERROR;
     }
 
   child->tid = tid;
-  list_push_back (&thread_current ()->children, &child->elem);
+  list_push_back (&thread_current ()->children, &child->elem); // add to children list
   return tid;
 }
 
@@ -127,22 +128,21 @@ start_process (void *exec_)
   struct intr_frame if_;
   bool success;
 
-  // From here on, every way of exiting reports to the parent through this
-  thread_current ()->self_info = exec->child;
+  thread_current ()->self_info = exec->child; // save pointer to child info
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  lock_acquire (&filesys_lock); // load() reads the executable from the file system
+  lock_acquire (&filesys_lock); // lock before loading executable
   success = load (file_name, &if_.eip, &if_.esp);
   lock_release (&filesys_lock);
 
   /* If load failed, quit. */
-  palloc_free_page (file_name);
+  palloc_free_page (file_name); // free command line page
 
-  // Wake the parent in exec. EXEC is on its stack, so don't touch it after this
+  // signal parent that loading is done
   exec->success = success;
   sema_up (&exec->loaded);
 
@@ -179,16 +179,16 @@ process_wait (tid_t child_tid)
       if (child->tid != child_tid)
         continue;
 
-      // Blocks until the child exits; returns at once if it already has
+      // wait for child to exit
       sema_down (&child->exited);
       status = child->exit_status;
 
-      // Forget the child, so waiting for it a second time returns -1
+      // remove from list and free if last reference
       list_remove (&child->elem);
       release_child_info (child);
       return status;
     }
-  return -1; // not one of our children, or already waited for
+  return -1;
 }
 
 /* Free the current process's resources. */
@@ -198,10 +198,9 @@ process_exit (void)
   struct thread *cur = thread_current ();
   uint32_t *pd;
 
-  // Exiting closes every file the process still has open
-  syscall_close_files ();
+  syscall_close_files (); // close open files
 
-  // Closing our executable lets it be written to again
+  // close executable file to allow writing
   if (cur->exec_file != NULL)
     {
       lock_acquire (&filesys_lock);
@@ -215,8 +214,7 @@ process_exit (void)
   pd = cur->pagedir;
   if (pd != NULL)
     {
-      // Only user processes have a page directory, so kernel threads print nothing
-      printf ("%s: exit(%d)\n", cur->name, cur->exit_status);
+      printf ("%s: exit(%d)\n", cur->name, cur->exit_status); // print termination message
 
       /* Correct ordering here is crucial.  We must set
          cur->pagedir to NULL before switching page directories,
@@ -230,8 +228,7 @@ process_exit (void)
       pagedir_destroy (pd);
     }
 
-  // Hand our exit status to the parent and wake it if it is waiting.
-  // This comes after the exit message so the message is printed first.
+  // notify parent of exit status
   if (cur->self_info != NULL)
     {
       cur->self_info->exit_status = cur->exit_status;
@@ -239,7 +236,7 @@ process_exit (void)
       release_child_info (cur->self_info);
     }
 
-  // We will never wait for our remaining children, so let go of them
+  // release remaining child records
   while (!list_empty (&cur->children))
     {
       struct list_elem *e = list_pop_front (&cur->children);
@@ -255,8 +252,7 @@ release_child_info (struct child_info *child)
   enum intr_level old_level;
   bool last;
 
-  // Parent and child can get here at the same time, so the decrement
-  // and test must not be interrupted
+  /* Reference count decrement and test must be atomic. */
   old_level = intr_disable ();
   last = --child->ref_cnt == 0;
   intr_set_level (old_level);
@@ -376,7 +372,7 @@ load (char *cmdline, void (**eip) (void), void **esp)
     goto done;
   process_activate ();
 
-  // Split the command line into words; argv[] points into CMDLINE itself
+  // parse command line arguments
   argv = palloc_get_page (0);
   if (argv == NULL)
     goto done;
@@ -389,7 +385,7 @@ load (char *cmdline, void (**eip) (void), void **esp)
     }
   if (argc == 0)
     goto done;
-  file_name = argv[0]; // the first word is the program to run
+  file_name = argv[0]; // first token is executable name
 
   /* Open executable file. */
   file = filesys_open (file_name);
@@ -398,7 +394,7 @@ load (char *cmdline, void (**eip) (void), void **esp)
       printf ("load: %s: open failed\n", file_name);
       goto done;
     }
-  file_deny_write (file); // nobody may modify the program while it runs
+  file_deny_write (file); // deny write to running binary
 
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -483,8 +479,7 @@ load (char *cmdline, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  // On success keep the executable open until exit, since closing it
-  // would allow writes again
+  // keep file open on success so write remains denied
   if (success)
     t->exec_file = file;
   else
@@ -616,13 +611,12 @@ setup_stack (void **esp, int argc, char **argv)
   uint32_t argv_addr;
   int i;
 
-  // Everything must fit in the single stack page: the strings (padded to a word),
-  // argv[0..argc] and the three words for argv, argc and the return address
   for (i = 0; i < argc; i++)
     str_bytes += strlen (argv[i]) + 1;
   if (ROUND_UP (str_bytes, 4) + (argc + 1) * sizeof (char *) + 12 > PGSIZE)
     return false;
 
+  // allocate stack page
   kpage = palloc_get_page (PAL_USER | PAL_ZERO);
   if (kpage != NULL) 
     {
@@ -633,7 +627,7 @@ setup_stack (void **esp, int argc, char **argv)
   if (!success)
     return false;
 
-  // 1. Copy the argument strings to the top of the stack, remembering where each one landed
+  // copy argument strings to stack
   sp = PHYS_BASE;
   for (i = argc - 1; i >= 0; i--)
     {
@@ -643,15 +637,15 @@ setup_stack (void **esp, int argc, char **argv)
       argv[i] = sp;
     }
 
-  // 2. Round down to a multiple of 4 so the words below are aligned
+  // align stack pointer to 4 bytes
   wp = (uint32_t *) ((uintptr_t) sp & ~3);
 
-  // 3. argv[argc] is a null pointer, then argv[argc-1] down to argv[0]
-  *--wp = 0;
+  // push argv pointers
+  *--wp = 0; // null sentinel
   for (i = argc - 1; i >= 0; i--)
     *--wp = (uint32_t) argv[i];
 
-  // 4. argv (the address of argv[0]), argc, and a fake return address
+  // push argv, argc, and fake return address
   argv_addr = (uint32_t) wp;
   *--wp = argv_addr;
   *--wp = argc;

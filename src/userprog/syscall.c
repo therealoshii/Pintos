@@ -14,7 +14,6 @@
 
 struct lock filesys_lock;
 
-/* One entry in a process's open file table */
 struct open_file
   {
     int fd;
@@ -33,10 +32,7 @@ static void check_user_buffer (const void *buffer, unsigned size,
 static void check_user_string (const char *str);
 static uint32_t get_arg (struct intr_frame *, int n);
 
-static void sys_halt (void) NO_RETURN;
 static void sys_exit (int status) NO_RETURN;
-static int sys_exec (const char *cmd_line);
-static int sys_wait (int pid);
 static bool sys_create (const char *file, unsigned initial_size);
 static bool sys_remove (const char *file);
 static int sys_open (const char *file);
@@ -53,64 +49,59 @@ void
 syscall_init (void) 
 {
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
-  lock_init (&filesys_lock);
+  lock_init (&filesys_lock); // lock for file system access
 }
 
-/* System call dispatcher */
 static void
 syscall_handler (struct intr_frame *f)
 {
   switch (get_arg (f, 0))
     {
     case SYS_HALT:
-      sys_halt ();
+      shutdown_power_off (); // shut down the system
 
     case SYS_EXIT:
-      sys_exit (get_arg (f, 1));
+      sys_exit (get_arg (f, 1)); // exit current process
 
     case SYS_EXEC:
       {
         const char *cmd_line = (const char *) get_arg (f, 1);
-
         check_user_string (cmd_line);
-        f->eax = sys_exec (cmd_line);
+        f->eax = process_execute (cmd_line); // start child program
         break;
       }
 
     case SYS_WAIT:
-      f->eax = sys_wait (get_arg (f, 1));
+      f->eax = process_wait (get_arg (f, 1)); // wait for child to finish
       break;
 
     case SYS_CREATE:
       {
         const char *file = (const char *) get_arg (f, 1);
         unsigned initial_size = get_arg (f, 2);
-
         check_user_string (file);
-        f->eax = sys_create (file, initial_size);
+        f->eax = sys_create (file, initial_size); // create a new file
         break;
       }
 
     case SYS_REMOVE:
       {
         const char *file = (const char *) get_arg (f, 1);
-
         check_user_string (file);
-        f->eax = sys_remove (file);
+        f->eax = sys_remove (file); // delete a file
         break;
       }
 
     case SYS_OPEN:
       {
         const char *file = (const char *) get_arg (f, 1);
-
         check_user_string (file);
-        f->eax = sys_open (file);
+        f->eax = sys_open (file); // open a file
         break;
       }
 
     case SYS_FILESIZE:
-      f->eax = sys_filesize (get_arg (f, 1));
+      f->eax = sys_filesize (get_arg (f, 1)); // get file size
       break;
 
     case SYS_READ:
@@ -118,10 +109,8 @@ syscall_handler (struct intr_frame *f)
         int fd = get_arg (f, 1);
         void *buffer = (void *) get_arg (f, 2);
         unsigned size = get_arg (f, 3);
-
-        /* Buffer must be writable for read */
         check_user_buffer (buffer, size, true);
-        f->eax = sys_read (fd, buffer, size);
+        f->eax = sys_read (fd, buffer, size); // read from file or stdin
         break;
       }
 
@@ -130,22 +119,21 @@ syscall_handler (struct intr_frame *f)
         int fd = get_arg (f, 1);
         const void *buffer = (const void *) get_arg (f, 2);
         unsigned size = get_arg (f, 3);
-
         check_user_buffer (buffer, size, false);
-        f->eax = sys_write (fd, buffer, size);
+        f->eax = sys_write (fd, buffer, size); // write to file or console
         break;
       }
 
     case SYS_SEEK:
-      sys_seek (get_arg (f, 1), get_arg (f, 2));
+      sys_seek (get_arg (f, 1), get_arg (f, 2)); // change position in file
       break;
 
     case SYS_TELL:
-      f->eax = sys_tell (get_arg (f, 1));
+      f->eax = sys_tell (get_arg (f, 1)); // get current position
       break;
 
     case SYS_CLOSE:
-      sys_close (get_arg (f, 1));
+      sys_close (get_arg (f, 1)); // close file descriptor
       break;
 
     default:
@@ -153,7 +141,6 @@ syscall_handler (struct intr_frame *f)
     }
 }
 
-/* Read a byte from user address UADDR. Returns -1 on fault. */
 static int
 get_user (const uint8_t *uaddr)
 {
@@ -163,7 +150,6 @@ get_user (const uint8_t *uaddr)
   return result;
 }
 
-/* Write a byte to user address UDST. Returns false on fault. */
 static bool
 put_user (uint8_t *udst, uint8_t byte)
 {
@@ -173,7 +159,7 @@ put_user (uint8_t *udst, uint8_t byte)
   return error_code != -1;
 }
 
-/* Read a byte from user memory; exit(-1) on invalid address */
+// reads one user byte, exits with -1 if the address is invalid
 static uint8_t
 read_user_byte (const uint8_t *uaddr)
 {
@@ -187,7 +173,7 @@ read_user_byte (const uint8_t *uaddr)
   return byte;
 }
 
-/* Check readability, and if writable verify by writing back the same byte */
+// checks if memory byte is valid
 static void
 check_user_byte (const uint8_t *uaddr, bool writable)
 {
@@ -197,7 +183,7 @@ check_user_byte (const uint8_t *uaddr, bool writable)
     sys_exit (-1);
 }
 
-/* Check that the user buffer is valid across each page it touches */
+// check user buffer across all pages
 static void
 check_user_buffer (const void *buffer, unsigned size, bool writable)
 {
@@ -208,7 +194,6 @@ check_user_buffer (const void *buffer, unsigned size, bool writable)
   if (size == 0)
     return;
 
-  /* Check for overflow or address in kernel space */
   if (end < start || !is_user_vaddr (end))
     sys_exit (-1);
 
@@ -217,7 +202,7 @@ check_user_buffer (const void *buffer, unsigned size, bool writable)
     check_user_byte (p, writable);
 }
 
-/* Check every byte of a user string up to and including the null */
+// validates string until null terminator
 static void
 check_user_string (const char *str)
 {
@@ -227,25 +212,21 @@ check_user_string (const char *str)
     p++;
 }
 
-/* Read argument from user stack, byte-by-byte in case it straddles a page */
+// get argument from user stack
 static uint32_t
 get_arg (struct intr_frame *f, int n)
 {
   const uint8_t *p = (const uint8_t *) f->esp + n * sizeof (uint32_t);
-  uint32_t word = 0;
+  uint32_t arg;
+  uint8_t *dst = (uint8_t *) &arg;
   size_t i;
 
-  for (i = 0; i < sizeof word; i++)
-    word |= (uint32_t) read_user_byte (p + i) << (i * 8);
-  return word;
+  for (i = 0; i < sizeof arg; i++)
+    dst[i] = read_user_byte (p + i);
+  return arg;
 }
 
-static void
-sys_halt (void)
-{
-  shutdown_power_off ();
-}
-
+// exits the current thread with status
 static void
 sys_exit (int status)
 {
@@ -256,7 +237,10 @@ sys_exit (int status)
 static int
 sys_read (int fd, void *buffer, unsigned size)
 {
-  /* Keyboard read */
+  struct open_file *of;
+  int bytes;
+
+  // read from keyboard
   if (fd == STDIN_FILENO)
     {
       uint8_t *dst = buffer;
@@ -266,54 +250,40 @@ sys_read (int fd, void *buffer, unsigned size)
         dst[i] = input_getc ();
       return size;
     }
-  else
-    {
-      struct open_file *of = lookup_fd (fd);
-      int bytes;
 
-      if (of == NULL)
-        return -1;
-      lock_acquire (&filesys_lock);
-      bytes = file_read (of->file, buffer, size);
-      lock_release (&filesys_lock);
-      return bytes;
-    }
+  of = lookup_fd (fd);
+  if (of == NULL)
+    return -1;
+
+  // read from file
+  lock_acquire (&filesys_lock);
+  bytes = file_read (of->file, buffer, size);
+  lock_release (&filesys_lock);
+  return bytes;
 }
 
 static int
 sys_write (int fd, const void *buffer, unsigned size)
 {
-  /* Console write */
+  struct open_file *of;
+  int bytes;
+
+  // print to console
   if (fd == STDOUT_FILENO)
     {
       putbuf (buffer, size);
       return size;
     }
-  else
-    {
-      struct open_file *of = lookup_fd (fd);
-      int bytes;
 
-      if (of == NULL)
-        return -1;
-      lock_acquire (&filesys_lock);
-      bytes = file_write (of->file, buffer, size);
-      lock_release (&filesys_lock);
-      return bytes;
-    }
-}
+  of = lookup_fd (fd);
+  if (of == NULL)
+    return -1;
 
-/* Start a child process; -1 if it could not be loaded */
-static int
-sys_exec (const char *cmd_line)
-{
-  return process_execute (cmd_line);
-}
-
-static int
-sys_wait (int pid)
-{
-  return process_wait (pid);
+  // write to file
+  lock_acquire (&filesys_lock);
+  bytes = file_write (of->file, buffer, size);
+  lock_release (&filesys_lock);
+  return bytes;
 }
 
 static bool
@@ -338,6 +308,7 @@ sys_remove (const char *file)
   return ok;
 }
 
+// opens a file and returns fd
 static int
 sys_open (const char *file)
 {
@@ -359,7 +330,7 @@ sys_open (const char *file)
       lock_release (&filesys_lock);
       return -1;
     }
-  of->fd = cur->next_fd++;
+  of->fd = cur->next_fd++; // assign next file descriptor
   of->file = f;
   list_push_back (&cur->open_files, &of->elem);
   return of->fd;
@@ -405,12 +376,12 @@ sys_tell (int fd)
   return pos;
 }
 
+// close a single open file
 static void
 sys_close (int fd)
 {
   struct open_file *of = lookup_fd (fd);
 
-  /* Bad fd, already closed, or the console: nothing to do */
   if (of == NULL)
     return;
   list_remove (&of->elem);
@@ -420,7 +391,7 @@ sys_close (int fd)
   free (of);
 }
 
-/* Find FD in the current process's open file table, or NULL */
+// search for file descriptor in list
 static struct open_file *
 lookup_fd (int fd)
 {
@@ -436,7 +407,7 @@ lookup_fd (int fd)
   return NULL;
 }
 
-/* Close every file the current process has open. Called on exit. */
+// close all open files for current process
 void
 syscall_close_files (void)
 {
